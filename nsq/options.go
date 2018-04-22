@@ -11,8 +11,7 @@ type config struct {
 	nsqds       []string
 	nsqlookupds []string
 	marshal     func(interface{}) ([]byte, error)
-	unmarshal   func([]byte) (interface{}, error)
-	factories   map[string]func([]byte) (interface{}, error)
+	unmarshal   func([]byte, interface{}) error
 	options     *nsq.Config
 	keep404     bool
 	logger      Logger
@@ -23,16 +22,8 @@ type config struct {
 // Option modifies Publisher and Subscriber configuration
 type Option func(*config) error
 
-// TopicFactory specifies converter from wire format to Go object for the specified topic
-func TopicFactory(topic string, f func([]byte) (interface{}, error)) Option {
-	return func(dest *config) error {
-		dest.factories[topic] = f
-		return nil
-	}
-}
-
-// Unmarshaler specifies default factory for topics
-func Unmarshaler(f func([]byte) (interface{}, error)) Option {
+// Unmarshaler specifies unmarshal func
+func Unmarshaler(f func([]byte, interface{}) error) Option {
 	return func(dest *config) error {
 		dest.unmarshal = f
 		return nil

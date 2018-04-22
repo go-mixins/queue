@@ -3,6 +3,7 @@ package nsq
 import (
 	"encoding/json"
 	"errors"
+	"reflect"
 	"sync"
 	"time"
 
@@ -26,9 +27,8 @@ func NewSubscriber(opts ...Option) (res *Subscriber, err error) {
 	res = new(Subscriber)
 	res.config = config{
 		options:     nsq.NewConfig(),
-		factories:   make(map[string]func([]byte) (interface{}, error)),
 		stopTimeout: 1 * time.Minute,
-		unmarshal:   raw,
+		unmarshal:   json.Unmarshal,
 	}
 	for _, opt := range opts {
 		if err = opt(&res.config); err != nil {
@@ -84,27 +84,32 @@ func (s *Subscriber) Close() error {
 	return nil
 }
 
-func raw(data []byte) (interface{}, error) {
-	return json.RawMessage(data), nil
-}
-
 func (s *Subscriber) convert(topic string, handler queue.Handler) nsq.HandlerFunc {
-	f := s.factories[topic]
-	if f == nil {
-		f = s.unmarshal
-	}
 	return func(msg *nsq.Message) (err error) {
-		val, err := f(msg.Body)
-		if err != nil {
-			return
-		}
-		err = handler(val)
-		switch t := err.(type) {
+		switch t := handler(msg.Body).(type) {
 		case queue.Delay:
 			msg.RequeueWithoutBackoff(time.Duration(t))
-			err = nil
+			return nil
+		default:
+			return t
 		}
-		return err
+	}
+}
+
+// model provides converter from NSQ wire format to Go objects
+func (s *Subscriber) model(model queue.Model, next queue.Handler) queue.Handler {
+	typeModel := reflect.TypeOf(model)
+	if typeModel.Kind() == reflect.Ptr {
+		typeModel = typeModel.Elem()
+	}
+	return func(val interface{}) (err error) {
+		if data, ok := val.([]byte); ok {
+			val = reflect.New(typeModel).Interface()
+			if err = s.unmarshal(data, val); err != nil {
+				return
+			}
+		}
+		return next(val)
 	}
 }
 
@@ -131,6 +136,8 @@ func (s *Subscriber) Subscribe(topic, channel string, handler queue.Handler, opt
 			c = int(t)
 		case queue.Middleware:
 			handler = t(handler)
+		case queue.Model:
+			handler = s.model(t, handler)
 		}
 	}
 	consumer.AddConcurrentHandlers(s.convert(topic, handler), c)

@@ -8,6 +8,9 @@ import (
 // Option is anything that can be passed to Publish and Subscribe
 type Option interface{}
 
+// Model helps specific implementations rehydrate messages from wire format
+type Model interface{}
+
 // Handler receives payload from the queue
 type Handler func(msg interface{}) error
 
