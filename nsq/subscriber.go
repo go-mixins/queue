@@ -1,6 +1,7 @@
 package nsq
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -14,39 +15,40 @@ type mapKey struct {
 
 // Subscriber implements queue.Subscriber with NSQ
 type Subscriber struct {
-	// NSQlookupD connection URL for consumers
-	NSQLookupD string
-
-	// List of NSQD addresses to connect if NSQLookupD is not specified
-	NSQDs []string
-
-	// NSQ options. Specified as a comma-separated list of key=value pairs.
-	Options string
-
-	// Log level
-	LogLevel LogLevel
-
-	// Filter out TOPIC_NOT_FOUND log messages by default
-	KeepNsqLookupD404 bool
-
-	// Logger for NSQ-specific messages
-	Logger Logger
-
+	config
 	consumers map[mapKey]*nsq.Consumer
+	l         sync.RWMutex
+}
 
-	l sync.Mutex
+// NewSubscriber creates the Subscriber
+func NewSubscriber(opts ...Option) (res *Subscriber, err error) {
+	res = new(Subscriber)
+	res.config = config{
+		options:   nsq.NewConfig(),
+		factories: make(map[string]func([]byte) (interface{}, error)),
+		unmarshal: raw,
+	}
+	for _, opt := range opts {
+		if err = opt(&res.config); err != nil {
+			return
+		}
+	}
+	if len(res.nsqlookupds) == 0 && len(res.nsqds) == 0 {
+		res.nsqlookupds = append(res.nsqlookupds, "localhost:4161")
+	}
+	res.consumers = make(map[mapKey]*nsq.Consumer)
+	return
 }
 
 // Connect starts message processing. Further Subscribes will panic.
 func (s *Subscriber) Connect() (err error) {
-	if s.NSQLookupD == "" && len(s.NSQDs) == 0 {
-		s.NSQLookupD = "localhost:4161"
-	}
+	s.l.RLock()
+	defer s.l.RUnlock()
 	for _, c := range s.consumers {
-		if len(s.NSQDs) != 0 {
-			err = c.ConnectToNSQDs(s.NSQDs)
+		if len(s.nsqds) != 0 {
+			err = c.ConnectToNSQDs(s.nsqds)
 		} else {
-			err = c.ConnectToNSQLookupd(s.NSQLookupD)
+			err = c.ConnectToNSQLookupds(s.nsqlookupds)
 		}
 		if err != nil {
 			break
@@ -55,9 +57,21 @@ func (s *Subscriber) Connect() (err error) {
 	return
 }
 
-func convert(handler queue.Handler) nsq.HandlerFunc {
-	return func(msg *nsq.Message) error {
-		err := handler(msg.Body)
+func raw(data []byte) (interface{}, error) {
+	return json.RawMessage(data), nil
+}
+
+func (s *Subscriber) convert(topic string, handler queue.Handler) nsq.HandlerFunc {
+	f := s.factories[topic]
+	if f == nil {
+		f = s.unmarshal
+	}
+	return func(msg *nsq.Message) (err error) {
+		val, err := f(msg.Body)
+		if err != nil {
+			return
+		}
+		err = handler(val)
 		switch t := err.(type) {
 		case queue.Delay:
 			msg.RequeueWithoutBackoff(time.Duration(t))
@@ -72,21 +86,14 @@ func (s *Subscriber) Subscribe(topic, channel string, handler queue.Handler, opt
 	s.l.Lock()
 	defer s.l.Unlock()
 	key := mapKey{topic, channel}
-	if s.consumers == nil {
-		s.consumers = make(map[mapKey]*nsq.Consumer)
-	}
 	consumer := s.consumers[key]
 	if consumer == nil {
-		config, err := toNSQConfig(s.Options)
+		consumer, err = nsq.NewConsumer(topic, channel, s.options)
 		if err != nil {
 			return err
 		}
-		consumer, err = nsq.NewConsumer(topic, channel, config)
-		if err != nil {
-			return err
-		}
-		if s.Logger != nil {
-			consumer.SetLogger(logger{s.KeepNsqLookupD404, s.Logger}, s.LogLevel.toNSQ())
+		if s.logger != nil {
+			consumer.SetLogger(s, s.level)
 		}
 		s.consumers[key] = consumer
 	}
@@ -99,7 +106,7 @@ func (s *Subscriber) Subscribe(topic, channel string, handler queue.Handler, opt
 			handler = t(handler)
 		}
 	}
-	consumer.AddConcurrentHandlers(convert(handler), c)
+	consumer.AddConcurrentHandlers(s.convert(topic, handler), c)
 	consumer.ChangeMaxInFlight(c * 100) // XXX
 	return
 }

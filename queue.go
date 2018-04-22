@@ -14,8 +14,8 @@ type Handler func(msg interface{}) error
 // Middleware applies transform to Handler
 type Middleware func(Handler) Handler
 
-// Delay is requeue delay. It serves as an option to Publish and also can be
-// returned by handlers to requeue with delay.
+// Delay is an option to defer Publish. Also can be returned by
+// handlers to requeue the same data with delay.
 type Delay time.Duration
 
 func (e Delay) Error() string {
