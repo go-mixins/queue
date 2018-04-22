@@ -13,50 +13,37 @@ import (
 
 // Publisher implements queue.Publisher with NSQ
 type Publisher struct {
-	// NSQD connection URL for producer
-	NSQD string
-
-	// NSQ options. Specified as a comma-separated list of key=value pairs.
-	Options string
-
-	// Log level
-	LogLevel LogLevel
-
-	// Logger for NSQ-specific messages
-	Logger Logger
-
-	// Converter to wire format
-	Marshaler func(interface{}) ([]byte, error)
-
 	producer *nsq.Producer
+	config
 }
 
 var _ queue.Publisher = (*Publisher)(nil)
 
-// Open initializes the Publisher with sensible defaults and connects to NSQD
-func (p *Publisher) Open() (err error) {
-	if p.NSQD == "" {
-		p.NSQD = "localhost:4150"
+// NewPublisher creates the Publisher
+func NewPublisher(opts ...Option) (res *Publisher, err error) {
+	res = new(Publisher)
+	res.config = config{marshal: json.Marshal, options: nsq.NewConfig()}
+	for _, opt := range opts {
+		if err = opt(&res.config); err != nil {
+			return
+		}
 	}
-	if p.Marshaler == nil {
-		p.Marshaler = json.Marshal
+	if len(res.nsqds) == 0 {
+		res.nsqds = append(res.nsqds, "localhost:4150")
 	}
-	cfg, err := toNSQConfig(p.Options)
-	if err != nil {
+	if res.producer, err = nsq.NewProducer(res.nsqds[0], res.options); err != nil {
 		return
 	}
-	if p.producer, err = nsq.NewProducer(p.NSQD, cfg); err != nil {
-		return
+	if res.logger != nil {
+		res.producer.SetLogger(res, res.level)
 	}
-	if p.Logger != nil {
-		p.producer.SetLogger(logger{Logger: p.Logger}, p.LogLevel.toNSQ())
-	}
-	return p.producer.Ping()
+	err = res.producer.Ping()
+	return
 }
 
 // Publish marshals object to JSON and sends it to the specified topic
 func (p *Publisher) Publish(topic string, obj interface{}, options ...queue.Option) (err error) {
-	jsonData, err := json.Marshal(obj)
+	data, err := p.marshal(obj)
 	if err != nil {
 		return
 	}
@@ -64,10 +51,10 @@ func (p *Publisher) Publish(topic string, obj interface{}, options ...queue.Opti
 	for _, opt := range options {
 		switch t := opt.(type) {
 		case queue.Delay:
-			pf = func(topic string, jsonData []byte) error {
-				return p.producer.DeferredPublish(topic, time.Duration(t), jsonData)
+			pf = func(topic string, data []byte) error {
+				return p.producer.DeferredPublish(topic, time.Duration(t), data)
 			}
 		}
 	}
-	return pf(topic, jsonData)
+	return pf(topic, data)
 }

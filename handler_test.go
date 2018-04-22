@@ -3,9 +3,12 @@ package queue_test
 import (
 	"encoding/json"
 	"errors"
+	"flag"
 	"fmt"
+	"os"
 	"reflect"
 	"testing"
+	"time"
 
 	"github.com/go-mixins/queue"
 )
@@ -19,6 +22,7 @@ type testHCase struct {
 
 var errTestH = errors.New("test error")
 var errCaughtPanic = errors.New("panic caught")
+var delay int
 
 type testArg struct {
 	X float64
@@ -29,6 +33,12 @@ type customTestError int
 
 func (c customTestError) Error() string {
 	return fmt.Sprintf("%d", c)
+}
+
+func TestMain(m *testing.M) {
+	flag.IntVar(&delay, "delay", 0, "imitated handler work in ms")
+	flag.Parse()
+	os.Exit(m.Run())
 }
 
 func testFloatH(x float64) error {
@@ -95,10 +105,48 @@ func TestH(t *testing.T) {
 				t.Errorf("panic: %v", p)
 			}
 			return errCaughtPanic
-		})(queue.H(tc.h, json.Unmarshal))
+		})(queue.FuncH(tc.h, json.Unmarshal))
 		err := handler([]byte(tc.val))
 		if !reflect.DeepEqual(err, tc.err) {
 			t.Errorf("invalid error: %#v", err)
+		}
+	}
+}
+
+func zeroUnmarshal(data []byte, dest interface{}) error {
+	return nil
+}
+
+func zeroHandler(param []byte) error {
+	if delay > 0 {
+		time.Sleep(time.Duration(delay) * time.Millisecond)
+	}
+	return nil
+}
+
+func BenchmarkH(b *testing.B) {
+	h := queue.FuncH(zeroHandler, zeroUnmarshal)
+	for i := 0; i < b.N; i++ {
+		if err := h([]byte(`{"X": 12345.6}`)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkTypeH(b *testing.B) {
+	h := queue.TypeH(reflect.TypeOf([]byte{}), zeroUnmarshal)(func(val interface{}) error { return zeroHandler(*val.(*[]byte)) })
+	for i := 0; i < b.N; i++ {
+		if err := h([]byte(`{"X": 12345.6}`)); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkZeroH(b *testing.B) {
+	h := func(val interface{}) error { return zeroHandler(val.([]byte)) }
+	for i := 0; i < b.N; i++ {
+		if err := h([]byte(`{"X": 12345.6}`)); err != nil {
+			b.Fatal(err)
 		}
 	}
 }

@@ -6,8 +6,8 @@ import (
 
 type unmarshalFunc func(data []byte, dest interface{}) error
 
-// Model constructs middleware to unmarshal message bytes into Go object
-func Model(typeModel reflect.Type, unmarshal unmarshalFunc) Middleware {
+// TypeH constructs middleware to unmarshal message bytes into Go object specified by typeModel
+func TypeH(typeModel reflect.Type, unmarshal unmarshalFunc) Middleware {
 	return func(next Handler) Handler {
 		return func(val interface{}) error {
 			if data, ok := val.([]byte); ok {
@@ -23,9 +23,9 @@ func Model(typeModel reflect.Type, unmarshal unmarshalFunc) Middleware {
 
 var errorInterface = reflect.TypeOf((*error)(nil)).Elem()
 
-// H constructs Handler from a single-argument func and unmarshaler
-func H(h interface{}, unmarshal unmarshalFunc) Handler {
-	fv := reflect.ValueOf(h)
+// FuncH constructs Handler from a single-argument func
+func FuncH(f interface{}, unmarshal unmarshalFunc) Handler {
+	fv := reflect.ValueOf(f)
 	t := fv.Type()
 	switch {
 	case t.Kind() != reflect.Func:
@@ -37,7 +37,7 @@ func H(h interface{}, unmarshal unmarshalFunc) Handler {
 	case !t.Out(0).Implements(errorInterface):
 		panic("handler must return error")
 	}
-	return Model(t.In(0), unmarshal)(func(val interface{}) error {
+	return TypeH(t.In(0), unmarshal)(func(val interface{}) error {
 		res := fv.Call([]reflect.Value{reflect.ValueOf(val).Elem()})
 		if res[0].IsNil() {
 			return nil
