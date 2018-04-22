@@ -1,6 +1,7 @@
 package queue_test
 
 import (
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -94,7 +95,7 @@ func TestH(t *testing.T) {
 				t.Errorf("panic: %v", p)
 			}
 			return errCaughtPanic
-		})(queue.H(tc.h))
+		})(queue.H(tc.h, json.Unmarshal))
 		err := handler([]byte(tc.val))
 		if !reflect.DeepEqual(err, tc.err) {
 			t.Errorf("invalid error: %#v", err)

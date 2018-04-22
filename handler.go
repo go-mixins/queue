@@ -1,12 +1,13 @@
 package queue
 
 import (
-	"encoding/json"
 	"reflect"
 )
 
+type unmarshalFunc func(data []byte, dest interface{}) error
+
 // Model constructs middleware to unmarshal message bytes into Go object
-func Model(typeModel reflect.Type, unmarshal func(data []byte, dest interface{}) error) Middleware {
+func Model(typeModel reflect.Type, unmarshal unmarshalFunc) Middleware {
 	return func(next Handler) Handler {
 		return func(val interface{}) error {
 			if data, ok := val.([]byte); ok {
@@ -20,33 +21,10 @@ func Model(typeModel reflect.Type, unmarshal func(data []byte, dest interface{})
 	}
 }
 
-// JSON constructs unmarshaling middleware for JSON wire encoding
-func JSON(model interface{}) Middleware {
-	typeModel := reflect.TypeOf(model)
-	if typeModel.Kind() == reflect.Ptr {
-		typeModel = typeModel.Elem()
-	}
-	return Model(typeModel, json.Unmarshal)
-}
-
-// Recover prevents handler from propagating panic by calling `catch` on it
-func Recover(catch Handler) Middleware {
-	return func(next Handler) Handler {
-		return func(val interface{}) (err error) {
-			defer func() {
-				if p := recover(); p != nil {
-					err = catch(p)
-				}
-			}()
-			return next(val)
-		}
-	}
-}
-
 var errorInterface = reflect.TypeOf((*error)(nil)).Elem()
 
-// H constructs Handler from a single-argument func
-func H(h interface{}) Handler {
+// H constructs Handler from a single-argument func and unmarshaler
+func H(h interface{}, unmarshal unmarshalFunc) Handler {
 	fv := reflect.ValueOf(h)
 	t := fv.Type()
 	switch {
@@ -59,7 +37,7 @@ func H(h interface{}) Handler {
 	case !t.Out(0).Implements(errorInterface):
 		panic("handler must return error")
 	}
-	return Model(t.In(0), json.Unmarshal)(func(val interface{}) error {
+	return Model(t.In(0), unmarshal)(func(val interface{}) error {
 		res := fv.Call([]reflect.Value{reflect.ValueOf(val).Elem()})
 		if res[0].IsNil() {
 			return nil
