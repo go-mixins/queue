@@ -1,6 +1,7 @@
 package nsq
 
 import (
+	"encoding/json"
 	"sync"
 	"time"
 
@@ -22,7 +23,11 @@ type Subscriber struct {
 // NewSubscriber creates the Subscriber
 func NewSubscriber(opts ...Option) (res *Subscriber, err error) {
 	res = new(Subscriber)
-	res.config = config{options: nsq.NewConfig()}
+	res.config = config{
+		options:   nsq.NewConfig(),
+		factories: make(map[string]func([]byte) (interface{}, error)),
+		unmarshal: raw,
+	}
 	for _, opt := range opts {
 		if err = opt(&res.config); err != nil {
 			return
@@ -52,9 +57,21 @@ func (s *Subscriber) Connect() (err error) {
 	return
 }
 
-func convert(handler queue.Handler) nsq.HandlerFunc {
-	return func(msg *nsq.Message) error {
-		err := handler(msg.Body)
+func raw(data []byte) (interface{}, error) {
+	return json.RawMessage(data), nil
+}
+
+func (s *Subscriber) convert(topic string, handler queue.Handler) nsq.HandlerFunc {
+	f := s.factories[topic]
+	if f == nil {
+		f = s.unmarshal
+	}
+	return func(msg *nsq.Message) (err error) {
+		val, err := f(msg.Body)
+		if err != nil {
+			return
+		}
+		err = handler(val)
 		switch t := err.(type) {
 		case queue.Delay:
 			msg.RequeueWithoutBackoff(time.Duration(t))
@@ -89,7 +106,7 @@ func (s *Subscriber) Subscribe(topic, channel string, handler queue.Handler, opt
 			handler = t(handler)
 		}
 	}
-	consumer.AddConcurrentHandlers(convert(handler), c)
+	consumer.AddConcurrentHandlers(s.convert(topic, handler), c)
 	consumer.ChangeMaxInFlight(c * 100) // XXX
 	return
 }
