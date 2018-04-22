@@ -84,7 +84,7 @@ func (s *Subscriber) Close() error {
 	return nil
 }
 
-func (s *Subscriber) convert(topic string, handler queue.Handler) nsq.HandlerFunc {
+func (s *Subscriber) convert(handler queue.Handler) nsq.HandlerFunc {
 	return func(msg *nsq.Message) (err error) {
 		switch t := handler(msg.Body).(type) {
 		case queue.Delay:
@@ -140,7 +140,7 @@ func (s *Subscriber) Subscribe(topic, channel string, handler queue.Handler, opt
 			handler = s.model(t, handler)
 		}
 	}
-	consumer.AddConcurrentHandlers(s.convert(topic, handler), c)
+	consumer.AddConcurrentHandlers(s.convert(handler), c)
 	consumer.ChangeMaxInFlight(c * 100) // XXX
 	return
 }
