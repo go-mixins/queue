@@ -4,6 +4,7 @@ package nsq
 
 import (
 	"encoding/json"
+	"errors"
 	"time"
 
 	"github.com/nsqio/go-nsq"
@@ -28,8 +29,11 @@ func NewPublisher(opts ...Option) (res *Publisher, err error) {
 			return
 		}
 	}
-	if len(res.nsqds) == 0 {
+	if n := len(res.nsqds); n == 0 {
 		res.nsqds = append(res.nsqds, "localhost:4150")
+	} else if n > 1 {
+		err = errors.New("only one queue allowed for Publisher")
+		return
 	}
 	if res.producer, err = nsq.NewProducer(res.nsqds[0], res.options); err != nil {
 		return
