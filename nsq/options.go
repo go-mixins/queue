@@ -2,6 +2,7 @@ package nsq
 
 import (
 	"strings"
+	"time"
 
 	nsq "github.com/nsqio/go-nsq"
 )
@@ -15,6 +16,7 @@ type config struct {
 	options     *nsq.Config
 	keep404     bool
 	logger      Logger
+	stopTimeout time.Duration
 	level       nsq.LogLevel
 }
 
@@ -57,6 +59,14 @@ func Queue(urls ...string) Option {
 func Lookup(urls ...string) Option {
 	return func(dest *config) error {
 		dest.nsqlookupds = append(dest.nsqlookupds, urls...)
+		return nil
+	}
+}
+
+// StopTimeout specifies timeout to wait for consumers exit. Default is 1 minute.
+func StopTimeout(t time.Duration) Option {
+	return func(dest *config) error {
+		dest.stopTimeout = t
 		return nil
 	}
 }

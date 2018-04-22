@@ -2,6 +2,7 @@ package nsq
 
 import (
 	"encoding/json"
+	"errors"
 	"sync"
 	"time"
 
@@ -24,9 +25,10 @@ type Subscriber struct {
 func NewSubscriber(opts ...Option) (res *Subscriber, err error) {
 	res = new(Subscriber)
 	res.config = config{
-		options:   nsq.NewConfig(),
-		factories: make(map[string]func([]byte) (interface{}, error)),
-		unmarshal: raw,
+		options:     nsq.NewConfig(),
+		factories:   make(map[string]func([]byte) (interface{}, error)),
+		stopTimeout: 1 * time.Minute,
+		unmarshal:   raw,
 	}
 	for _, opt := range opts {
 		if err = opt(&res.config); err != nil {
@@ -55,6 +57,31 @@ func (s *Subscriber) Connect() (err error) {
 		}
 	}
 	return
+}
+
+// Close sends a stop signal to consumers and blocks until all of them are stopped
+func (s *Subscriber) Close() error {
+	var wg sync.WaitGroup
+	for _, c := range s.consumers {
+		wg.Add(1)
+		go func(c *nsq.Consumer) {
+			defer wg.Done()
+			c.Stop()
+			<-c.StopChan
+		}(c)
+	}
+	stopped := make(chan struct{})
+	go func() {
+		defer close(stopped)
+		wg.Wait()
+	}()
+	select {
+	case <-stopped:
+		break
+	case <-time.After(s.stopTimeout):
+		return errors.New("close timeout")
+	}
+	return nil
 }
 
 func raw(data []byte) (interface{}, error) {
