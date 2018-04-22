@@ -47,16 +47,16 @@ func Marshaler(m func(interface{}) ([]byte, error)) Option {
 	}
 }
 
-// Queue adds NSQD instance URL(s) to configuration
-func Queue(urls ...string) Option {
+// D adds NSQD instance URL(s) to configuration
+func D(urls ...string) Option {
 	return func(dest *config) error {
 		dest.nsqds = append(dest.nsqds, urls...)
 		return nil
 	}
 }
 
-// Lookup adds NSQLookupD instance URL(s) configuration
-func Lookup(urls ...string) Option {
+// LookupD adds NSQLookupD instance URL(s) configuration
+func LookupD(urls ...string) Option {
 	return func(dest *config) error {
 		dest.nsqlookupds = append(dest.nsqlookupds, urls...)
 		return nil
